@@ -6,7 +6,7 @@ const xlsx = require('xlsx');
 function getClient() {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error('Falta OPENAI_API_KEY en el archivo .env');
+    throw new Error('Falta OPENAI_API_KEY en el entorno');
   }
   return new OpenAI({ apiKey });
 }
@@ -24,7 +24,11 @@ function workbookToCompactText(filePath) {
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     const limitedRows = rows.slice(0, 300).map((row) => row.slice(0, 30));
     const text = limitedRows
-      .map((row) => row.map((cell) => String(cell ?? '').replace(/\s+/g, ' ').trim()).join(' | '))
+      .map((row) =>
+        row
+          .map((cell) => String(cell ?? '').replace(/\s+/g, ' ').trim())
+          .join(' | ')
+      )
       .join('\n');
 
     blocks.push(`### HOJA: ${sheetName}\n${text}`);
@@ -33,26 +37,41 @@ function workbookToCompactText(filePath) {
   return blocks.join('\n\n');
 }
 
+//
+// 🔥 FUNCIÓN MEJORADA (CLAVE)
+//
 function extractJson(raw) {
-  const fenced = raw.match(/```json\s*([\s\S]*?)```/i);
-  if (fenced) return JSON.parse(fenced[1]);
+  try {
+    return JSON.parse(raw);
+  } catch {}
 
-  const firstBracket = raw.indexOf('[');
-  const lastBracket = raw.lastIndexOf(']');
-  if (firstBracket >= 0 && lastBracket > firstBracket) {
-    return JSON.parse(raw.slice(firstBracket, lastBracket + 1));
-  }
+  try {
+    const fenced = raw.match(/```json\s*([\s\S]*?)```/i);
+    if (fenced) return JSON.parse(fenced[1]);
+  } catch {}
+
+  try {
+    const first = raw.indexOf('[');
+    const last = raw.lastIndexOf(']');
+    if (first !== -1 && last !== -1) {
+      return JSON.parse(raw.slice(first, last + 1));
+    }
+  } catch {}
+
+  console.log("⚠️ RESPUESTA IA COMPLETA:\n", raw);
 
   throw new Error('La IA no devolvió un JSON válido.');
 }
 
+//
+// 🔥 FUNCIÓN MEJORADA (CLAVE)
+//
 async function askModelForJson(input) {
   const client = getClient();
 
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-mini',
 
-    // 🔥 IMPORTANTE: usar formato nuevo
     input: Array.isArray(input)
       ? input
       : [
@@ -67,39 +86,28 @@ async function askModelForJson(input) {
           }
         ],
 
-    // 🔥 CLAVE para evitar errores con claves nuevas
     max_output_tokens: 2000
   });
 
   return response.output_text || '';
 }
+
 async function extractFromExcelWithAI(filePath, supplierName) {
   const workbookText = workbookToCompactText(filePath);
 
   const prompt = `
-Sos un extractor de listas de precios de luminaria para compras.
+Sos un extractor de listas de precios.
+
+IMPORTANTE:
+- Respondé SOLO JSON válido.
+- NO agregues texto antes ni después.
+
+Formato:
+[{"codigo":"...","precio":12345.67,"confianza":"alta"}]
+
 Proveedor: ${supplierName}
 
-Necesito que extraigas SOLO una lista JSON con objetos de la forma:
-[
-  {
-    "codigo": "...",
-    "precio": 12345.67,
-    "confianza": "alta|media|baja"
-  }
-]
-
-Reglas obligatorias:
-- No inventar códigos.
-- Ignorar descripciones.
-- Buscar códigos de producto y su precio de lista asociado.
-- Si ves porcentajes de descuento, IVA u otras columnas, priorizar PRECIO DE LISTA si existe.
-- Si hay varias hojas, recorrer todas.
-- Si un mismo código aparece varias veces, devolver una sola vez el precio más claro.
-- El precio debe quedar numérico, sin símbolos.
-- Responder SOLO con JSON válido.
-
-Contenido del Excel:
+Contenido:
 ${workbookText}
 `;
 
@@ -109,6 +117,7 @@ ${workbookText}
 
 async function extractFromFileWithAI(filePath, supplierName) {
   const client = getClient();
+
   const uploaded = await client.files.create({
     file: fs.createReadStream(filePath),
     purpose: 'user_data',
@@ -120,7 +129,13 @@ async function extractFromFileWithAI(filePath, supplierName) {
       content: [
         {
           type: 'input_text',
-          text: `Sos un extractor de listas de precios de luminaria para compras. Extraé SOLO codigo y precio, devolviendo exclusivamente JSON válido.`
+          text: `
+Sos un extractor de listas de precios.
+
+IMPORTANTE:
+- SOLO devolver JSON válido.
+- SIN texto extra.
+`
         }
       ]
     },
@@ -129,17 +144,14 @@ async function extractFromFileWithAI(filePath, supplierName) {
       content: [
         {
           type: 'input_text',
-          text: `Proveedor: ${supplierName}
+          text: `
+Proveedor: ${supplierName}
 
-Devolvé exclusivamente un JSON array con objetos:
-[{"codigo":"...","precio":12345.67,"confianza":"alta|media|baja"}]
+Formato requerido:
+[{"codigo":"...","precio":12345.67,"confianza":"alta"}]
 
-Reglas:
-- No inventar datos.
-- Ignorar descripciones.
-- Priorizar precio de lista si hay varias columnas.
-- Si no estás seguro, usar confianza baja.
-- Responder SOLO con JSON.`
+NO agregar explicaciones.
+`
         },
         {
           type: 'input_file',
@@ -155,6 +167,7 @@ Reglas:
 
 async function extractCodesAndPrices(filePath, supplierName) {
   const ext = extensionOf(filePath);
+
   if (ext === '.xlsx' || ext === '.xls') {
     return extractFromExcelWithAI(filePath, supplierName);
   }
