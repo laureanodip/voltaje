@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
 
@@ -6,12 +7,23 @@ let dbPromise;
 
 async function getDb() {
   if (!dbPromise) {
+
+    // 📁 Crear carpeta /data si no existe
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir);
+    }
+
+    // 📄 Ruta del archivo de base de datos
+    const dbPath = path.join(dataDir, 'app.db');
+
     dbPromise = open({
-      filename: path.join(__dirname, 'data', 'app.db'),
+      filename: dbPath,
       driver: sqlite3.Database,
     });
 
     const db = await dbPromise;
+
     await db.exec(`
       CREATE TABLE IF NOT EXISTS productos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
