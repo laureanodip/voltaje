@@ -48,15 +48,31 @@ function extractJson(raw) {
 
 async function askModelForJson(input) {
   const client = getClient();
+
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-    temperature: 0,
-    input,
+
+    // 🔥 IMPORTANTE: usar formato nuevo
+    input: Array.isArray(input)
+      ? input
+      : [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: input
+              }
+            ]
+          }
+        ],
+
+    // 🔥 CLAVE para evitar errores con claves nuevas
+    max_output_tokens: 2000
   });
 
   return response.output_text || '';
 }
-
 async function extractFromExcelWithAI(filePath, supplierName) {
   const workbookText = workbookToCompactText(filePath);
 
