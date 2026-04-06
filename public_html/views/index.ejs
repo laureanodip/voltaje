@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Compras Luminaria MVP</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Sistema de compras - luminaria</h1>
+    <p class="intro">MVP para importar equivalencias, subir listas sucias y obtener una comparativa por código con IA.</p>
+
+    <% if (flash) { %>
+      <div class="flash <%= flashType %>"><%= flash %></div>
+    <% } %>
+
+    <div class="grid">
+      <section class="card">
+        <h2>1) Importar equivalencias</h2>
+        <p>Subí tu Excel matriz. Debe tener producto interno en columna A y proveedores en fila 1.</p>
+        <form action="/importar-equivalencias" method="post" enctype="multipart/form-data">
+          <input type="file" name="equivalencias" accept=".xlsx,.xls" required />
+          <button type="submit">Importar equivalencias</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>2) Actualizar descuento de proveedor</h2>
+        <form action="/actualizar-descuento" method="post">
+          <input type="text" name="proveedor" placeholder="Ej: KING" required />
+          <input type="number" step="0.01" name="descuento" placeholder="Ej: 15" required />
+          <button type="submit">Guardar descuento</button>
+        </form>
+      </section>
+
+      <section class="card full">
+        <h2>3) Subir lista del proveedor</h2>
+        <p>Podés subir Excel, PDF o imagen. La app lo procesa con IA y guarda el archivo en el repositorio del proveedor.</p>
+        <form action="/procesar-lista" method="post" enctype="multipart/form-data">
+          <div class="row">
+            <input type="text" name="proveedor" placeholder="Ej: GRL GROUP" required />
+            <input type="number" step="0.01" name="descuento" placeholder="Descuento % (ej: 10)" value="0" />
+          </div>
+          <input type="file" name="lista" accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp" required />
+          <button type="submit">Procesar lista con IA</button>
+        </form>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Proveedores cargados</h2>
+      <% if (!proveedores.length) { %>
+        <p>Aún no hay proveedores importados.</p>
+      <% } else { %>
+        <table>
+          <thead>
+            <tr>
+              <th>Proveedor</th>
+              <th>Descuento</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% proveedores.forEach((p) => { %>
+              <tr>
+                <td><%= p.nombre %></td>
+                <td><%= Number(p.descuento || 0).toFixed(2) %>%</td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <h2>Últimas listas subidas</h2>
+      <% if (!ultimasListas.length) { %>
+        <p>No hay listas procesadas todavía.</p>
+      <% } else { %>
+        <table>
+          <thead>
+            <tr>
+              <th>Proveedor</th>
+              <th>Archivo</th>
+              <th>Estado</th>
+              <th>Mensaje</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% ultimasListas.forEach((l) => { %>
+              <tr>
+                <td><%= l.proveedor %></td>
+                <td><%= l.archivo_original %></td>
+                <td><%= l.estado %></td>
+                <td><%= l.mensaje || '-' %></td>
+                <td><%= l.fecha_subida %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <h2>Comparativa rápida</h2>
+      <p>Si el código existe en equivalencias pero no fue detectado en la última lista del proveedor, el precio queda vacío y en tu lógica equivale a “no encontrado”.</p>
+      <% if (!comparativa.length) { %>
+        <p>No hay datos para comparar todavía.</p>
+      <% } else { %>
+        <table>
+          <thead>
+            <tr>
+              <th>Producto interno</th>
+              <th>Proveedor</th>
+              <th>Código</th>
+              <th>Precio final</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% comparativa.forEach((r) => { %>
+              <tr>
+                <td><%= r.producto %></td>
+                <td><%= r.proveedor %></td>
+                <td><%= r.codigo_equivalente %></td>
+                <td><%= r.precio_final == null ? 'no encontrado' : r.precio_final %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </section>
+  </div>
+</body>
+</html>
