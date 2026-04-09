@@ -31,52 +31,42 @@ function workbookToCompactText(filePath) {
   return text;
 }
 
-// 🔥 FUNCIÓN FINAL COMPATIBLE 100%
-async function askModelForJson(input) {
+// 🔥 PARSER ROBUSTO FINAL
+function safeParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+  } catch {}
+
+  try {
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) return JSON.parse(match[0]);
+  } catch {}
+
+  console.log("⚠️ RESPUESTA IA:", text);
+  throw new Error("No se pudo parsear JSON");
+}
+
+// 🔥 LLAMADA SIMPLE Y ESTABLE
+async function askModel(prompt) {
   const client = getClient();
 
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-
-    input: [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: input }
-        ]
-      }
-    ],
-
-    text: {
-      format: {
-        type: "json_schema",
-        name: "respuesta",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            items: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  codigo: { type: "string" },
-                  precio: { type: "number" }
-                },
-                required: ["codigo", "precio"]
-              }
-            }
-          },
-          required: ["items"]
-        }
-      }
-    },
-
+    input: prompt,
     max_output_tokens: 2000
   });
 
-  return response.output_parsed;
+  const text = response.output_text || "";
+
+  return text
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
 }
 
 // 🔹 EXCEL
@@ -84,16 +74,28 @@ async function extractFromExcelWithAI(filePath, supplierName) {
   const text = workbookToCompactText(filePath);
 
   const prompt = `
+Extraer códigos y precios.
+
 Proveedor: ${supplierName}
 
-Extraer códigos y precios de lista.
-`;
-
-  const result = await askModelForJson(prompt + "\n\n" + text);
-  return result.items || [];
+Responder SOLO JSON así:
+{
+ "items":[
+  {"codigo":"...","precio":12345}
+ ]
 }
 
-// 🔹 PDF / IMAGEN
+Datos:
+${text}
+`;
+
+  const raw = await askModel(prompt);
+  const parsed = safeParseJson(raw);
+
+  return parsed.items || [];
+}
+
+// 🔹 PDF
 async function extractFromFileWithAI(filePath, supplierName) {
   const client = getClient();
 
@@ -115,6 +117,13 @@ async function extractFromFileWithAI(filePath, supplierName) {
 Proveedor: ${supplierName}
 
 Extraer códigos y precios.
+
+Formato:
+{
+ "items":[
+  {"codigo":"...","precio":12345}
+ ]
+}
 `
           },
           {
@@ -125,36 +134,17 @@ Extraer códigos y precios.
       }
     ],
 
-    text: {
-      format: {
-        type: "json_schema",
-        name: "respuesta",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            items: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  codigo: { type: "string" },
-                  precio: { type: "number" }
-                },
-                required: ["codigo", "precio"]
-              }
-            }
-          },
-          required: ["items"]
-        }
-      }
-    },
-
     max_output_tokens: 2000
   });
 
-  return response.output_parsed.items || [];
+  const text = (response.output_text || "")
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+
+  const parsed = safeParseJson(text);
+
+  return parsed.items || [];
 }
 
 // 🔹 MAIN
