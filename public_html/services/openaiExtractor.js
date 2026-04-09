@@ -13,7 +13,9 @@ function extensionOf(filePath) {
   return path.extname(filePath).toLowerCase();
 }
 
-// 🔹 EXCEL
+// ==========================
+// 🔹 EXCEL → TEXTO
+// ==========================
 function workbookToText(filePath) {
   const wb = xlsx.readFile(filePath);
   let text = '';
@@ -30,7 +32,9 @@ function workbookToText(filePath) {
   return text;
 }
 
-// 🔥 PARSER FINAL
+// ==========================
+// 🔥 PARSER INTELIGENTE
+// ==========================
 function extractFromText(text) {
   const lines = text.split('\n');
   const results = [];
@@ -38,7 +42,10 @@ function extractFromText(text) {
   for (const line of lines) {
     if (!line.trim()) continue;
 
+    // detectar códigos tipo LEP-1100-6
     const codigos = line.match(/[A-Z]{2,}-\d{2,}(-\d+)?/g);
+
+    // detectar precios (formato AR o US)
     const precios = line.match(/\d{1,3}(\.\d{3})*(,\d+)?|\d+/g);
 
     if (!codigos || !precios) continue;
@@ -46,7 +53,10 @@ function extractFromText(text) {
     const codigo = codigos[0];
 
     let precioRaw = precios[precios.length - 1];
-    precioRaw = precioRaw.replace(/\./g, '').replace(',', '.');
+
+    precioRaw = precioRaw
+      .replace(/\./g, '')   // miles
+      .replace(',', '.');  // decimal
 
     const precio = Number(precioRaw);
 
@@ -55,10 +65,16 @@ function extractFromText(text) {
     }
   }
 
-  return results;
+  // eliminar duplicados
+  const map = new Map();
+  results.forEach(r => map.set(r.codigo, r));
+
+  return Array.from(map.values());
 }
 
-// 🔥 IA TEXTO
+// ==========================
+// 🔹 IA TEXTO (EXCEL)
+// ==========================
 async function askAI(text) {
   const client = getClient();
 
@@ -68,14 +84,22 @@ async function askAI(text) {
     max_output_tokens: 2000
   });
 
-  return response.output_text || '';
+  return (response.output_text || '')
+    .replace(/```/g, '')
+    .replace(/\$/g, '')
+    .trim();
 }
 
-// 🔥 IA VISIÓN CORRECTA
+// ==========================
+// 🔥 IA ARCHIVO (PDF / IMG)
+// ==========================
 async function askVision(filePath, supplierName) {
   const client = getClient();
 
-  const base64 = fs.readFileSync(filePath).toString("base64");
+  const uploaded = await client.files.create({
+    file: fs.createReadStream(filePath),
+    purpose: 'user_data',
+  });
 
   const response = await client.responses.create({
     model: "gpt-5-mini",
@@ -89,15 +113,20 @@ async function askVision(filePath, supplierName) {
             text: `
 Proveedor: ${supplierName}
 
-Extraer códigos y precios visibles.
+Extraer TODOS los códigos de producto y precios visibles.
 
-Formato:
+FORMATO:
 CODIGO PRECIO
+
+Ejemplo:
+LEP-1100-6 12500
+
+NO agregar explicaciones.
 `
           },
           {
-            type: "input_image",
-            image_url: `data:image/png;base64,${base64}`
+            type: "input_file",
+            file_id: uploaded.id
           }
         ]
       }
@@ -106,23 +135,32 @@ CODIGO PRECIO
     max_output_tokens: 2000
   });
 
-  return response.output_text || '';
+  return (response.output_text || '')
+    .replace(/```/g, '')
+    .replace(/\$/g, '')
+    .trim();
 }
 
+// ==========================
 // 🔹 EXCEL
+// ==========================
 async function extractFromExcel(filePath, supplierName) {
   const text = workbookToText(filePath);
   const aiText = await askAI(text);
   return extractFromText(aiText);
 }
 
+// ==========================
 // 🔹 PDF / IMAGEN
+// ==========================
 async function extractFromFile(filePath, supplierName) {
   const aiText = await askVision(filePath, supplierName);
   return extractFromText(aiText);
 }
 
+// ==========================
 // 🔹 MAIN
+// ==========================
 async function extractCodesAndPrices(filePath, supplierName) {
   const ext = extensionOf(filePath);
 
