@@ -27,149 +27,61 @@ function normalizePrice(raw) {
     .replace(/\s+/g, '')
     .trim();
 
-  // formato argentino: 7.092,20
   if (value.includes(',') && value.includes('.')) {
     value = value.replace(/\./g, '').replace(',', '.');
   } else if (value.includes(',')) {
     value = value.replace(',', '.');
   } else {
-    // si viene 7.092 y parece miles
-    const dots = (value.match(/\./g) || []).length;
-    if (dots >= 1) value = value.replace(/\./g, '');
+    value = value.replace(/\./g, '');
   }
 
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : null;
 }
 
-function dedupeResults(results) {
+function dedupe(results) {
   const map = new Map();
-  for (const item of results) {
-    if (!item || !item.codigo || !item.precio) continue;
-    map.set(item.codigo, item);
+  for (const r of results) {
+    if (!r.codigo || !r.precio) continue;
+    map.set(r.codigo, r);
   }
   return Array.from(map.values());
 }
 
-function looksLikeCode(token) {
-  if (!token) return false;
-  const t = token.trim();
-
-  // acepta códigos tipo:
-  // LEP-1100-6
-  // DRV-12V-IP20-025W
-  // LE27-ECA60009-30
-  // W13308060283527
-  // ZT1018
-  // PER-A-1407-1M
-  return (
-    /^[A-Z0-9]{2,}(?:[-\/][A-Z0-9]{1,})+$/i.test(t) ||
-    /^[A-Z]{1,}[0-9]{2,}[A-Z0-9\-\/]*$/i.test(t) ||
-    /^[A-Z0-9]{6,}$/i.test(t)
-  );
+function looksLikeCode(text) {
+  return /^[A-Z0-9\-\/]{4,}$/i.test(text);
 }
 
 // ==========================
-// EXCEL
+// 🔥 DETECTOR DE COLUMNA REAL
 // ==========================
-function workbookToText(filePath) {
-  const wb = xlsx.readFile(filePath);
-  let text = '';
-
-  wb.SheetNames.forEach((name) => {
-    const sheet = wb.Sheets[name];
-    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-    rows.slice(0, 500).forEach((r) => {
-      text += r.join(' | ') + '\n';
-    });
-  });
-
-  return text;
-}
-
-// ==========================
-// PDF TEXTO
-// ==========================
-async function pdfToText(filePath) {
-  const buffer = fs.readFileSync(filePath);
-  const data = await pdf(buffer);
-  return data.text || '';
-}
-
-// ==========================
-// PARSERS
-// ==========================
-function extractPairsFromStructuredText(text) {
-  const lines = text
-    .split('\n')
-    .map((l) => l.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
+function extractFromTable(rows) {
   const results = [];
 
-  for (const line of lines) {
-    // Buscar precios tipo:
-    // $ 7.092,20
-    // 7092,20
-    // USD170
-    // USD 170
-    const priceMatches =
-      line.match(/\$\s*\d{1,3}(?:\.\d{3})*(?:,\d+)?/g) ||
-      line.match(/USD\s*\d+(?:[.,]\d+)?/gi) ||
-      line.match(/\d{1,3}(?:\.\d{3})*(?:,\d+)?/g);
+  for (const row of rows) {
+    if (!row || row.length < 2) continue;
 
-    if (!priceMatches) continue;
-
-    // Buscar candidatos a código en la línea
-    const tokens = line.split(/[\s|]+/).map((t) => t.trim());
-    const codeCandidates = tokens.filter(looksLikeCode);
-
-    if (!codeCandidates.length) continue;
-
-    const codigo = codeCandidates[0];
-    const precio = normalizePrice(priceMatches[priceMatches.length - 1]);
-
-    if (codigo && precio) {
-      results.push({ codigo, precio });
-    }
-  }
-
-  return dedupeResults(results);
-}
-
-function extractPairsFromAiLines(text) {
-  const lines = text
-    .split('\n')
-    .map((l) => l.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
-  const results = [];
-
-  for (const line of lines) {
-    // Formato esperado ideal:
-    // CODIGO | PRECIO
-    // CODIGO - PRECIO
-    // CODIGO PRECIO
     let codigo = null;
     let precio = null;
 
-    const pipeParts = line.split('|').map((p) => p.trim());
-    if (pipeParts.length >= 2) {
-      if (looksLikeCode(pipeParts[0])) codigo = pipeParts[0];
-      precio = normalizePrice(pipeParts[1]);
-    }
+    for (let i = 0; i < row.length; i++) {
+      const cell = String(row[i]).trim();
 
-    if (!codigo || !precio) {
-      const tokens = line.split(/\s+/);
-      const possibleCodes = tokens.filter(looksLikeCode);
-      const possiblePrices = tokens
-        .map(normalizePrice)
-        .filter((n) => Number.isFinite(n));
+      // detectar código
+      if (!codigo && looksLikeCode(cell)) {
+        codigo = cell;
+      }
 
-      if (!codigo && possibleCodes.length) codigo = possibleCodes[0];
-      if (!precio && possiblePrices.length) {
-        precio = possiblePrices[possiblePrices.length - 1];
+      // detectar precio SOLO si parece precio real
+      if (!precio) {
+        const match =
+          cell.match(/\$\s*\d{1,3}(?:\.\d{3})*(?:,\d+)?/) ||
+          cell.match(/USD\s*\d+(?:[.,]\d+)?/i) ||
+          (cell.includes(',') && cell.match(/\d+[.,]\d+/));
+
+        if (match) {
+          precio = normalizePrice(match[0]);
+        }
       }
     }
 
@@ -178,28 +90,47 @@ function extractPairsFromAiLines(text) {
     }
   }
 
-  return dedupeResults(results);
+  return dedupe(results);
 }
 
 // ==========================
-// IA TEXTO
+// EXCEL (AHORA BIEN HECHO)
 // ==========================
-async function askAIText(prompt) {
-  const client = getClient();
+function extractFromExcel(filePath) {
+  const wb = xlsx.readFile(filePath);
+  let results = [];
 
-  const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-    input: prompt,
-    max_output_tokens: 3000
+  wb.SheetNames.forEach((name) => {
+    const sheet = wb.Sheets[name];
+    const rows = xlsx.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: ''
+    });
+
+    const parsed = extractFromTable(rows);
+    results = results.concat(parsed);
   });
 
-  return (response.output_text || '').replace(/```/g, '').trim();
+  return dedupe(results);
 }
 
 // ==========================
-// IA DOCUMENTO (PDF/IMAGEN)
+// PDF TEXTO
 // ==========================
-async function askAIDocument(filePath, supplierName) {
+async function extractFromPdfText(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const data = await pdf(buffer);
+
+  const lines = data.text.split('\n');
+
+  const rows = lines.map(line => line.split(/\s+/));
+  return extractFromTable(rows);
+}
+
+// ==========================
+// IA OCR (IMÁGENES / PDFs ROTOS)
+// ==========================
+async function extractWithAI(filePath, supplierName) {
   const client = getClient();
 
   const uploaded = await client.files.create({
@@ -218,27 +149,23 @@ async function askAIDocument(filePath, supplierName) {
             text: `
 Proveedor: ${supplierName}
 
-Necesito OCR + extracción de precios.
-Leé el documento completo, aunque sea catálogo escaneado o imagen.
+Analizá este documento (puede ser imagen o escaneo).
 
-Extraé SOLO los productos que tengan:
-1. código de producto
-2. precio visible
+Extraé SOLO tabla de productos.
 
-Respondé UNA línea por producto con este formato exacto:
+Formato de salida:
 CODIGO | PRECIO
 
-Ejemplos:
+Ejemplo:
+IM2102002 | 40,73
 LEP-1100-6 | 29000
-DRV-12V-IP20-025W | 7092,20
-W13308060283527 | 12198,60
 
-Reglas:
-- no agregues explicaciones
-- no agregues títulos
-- no agregues texto extra
-- si una línea no tiene precio visible, no la incluyas
-- si una línea no tiene código claro, no la incluyas
+REGLAS:
+- ignorar descripciones
+- ignorar medidas
+- ignorar lumenes
+- ignorar cantidades
+- SOLO precio real de venta
 - recorrer todas las páginas
 `
           },
@@ -252,55 +179,10 @@ Reglas:
     max_output_tokens: 5000
   });
 
-  return (response.output_text || '').replace(/```/g, '').trim();
-}
+  const text = (response.output_text || '').replace(/```/g, '');
 
-// ==========================
-// EXTRACTORES
-// ==========================
-async function extractFromExcel(filePath, supplierName) {
-  const text = workbookToText(filePath);
-
-  // 1) intento directo desde texto del excel
-  let direct = extractPairsFromStructuredText(text);
-  if (direct.length >= 5) return direct;
-
-  // 2) fallback IA
-  const aiText = await askAIText(`
-Proveedor: ${supplierName}
-
-Del siguiente texto, extraer códigos y precios.
-
-Devolver solo líneas:
-CODIGO | PRECIO
-
-${text}
-  `);
-
-  return extractPairsFromAiLines(aiText);
-}
-
-async function extractFromPdf(filePath, supplierName) {
-  // 1) intentar texto real del PDF
-  const pdfText = await pdfToText(filePath);
-
-  const direct = extractPairsFromStructuredText(pdfText);
-
-  // si ya encontró suficientes, no gastar IA
-  if (direct.length >= 5) {
-    return direct;
-  }
-
-  // 2) fallback documento completo con IA/OCR
-  const aiText = await askAIDocument(filePath, supplierName);
-  const aiResults = extractPairsFromAiLines(aiText);
-
-  return aiResults;
-}
-
-async function extractFromImageLikeFile(filePath, supplierName) {
-  const aiText = await askAIDocument(filePath, supplierName);
-  return extractPairsFromAiLines(aiText);
+  const rows = text.split('\n').map(l => l.split('|'));
+  return extractFromTable(rows);
 }
 
 // ==========================
@@ -309,15 +191,19 @@ async function extractFromImageLikeFile(filePath, supplierName) {
 async function extractCodesAndPrices(filePath, supplierName) {
   const ext = extensionOf(filePath);
 
-  if (ext === '.xlsx' || ext === '.xls') {
-    return extractFromExcel(filePath, supplierName);
+  if (ext.includes('xls')) {
+    const data = extractFromExcel(filePath);
+    if (data.length > 3) return data;
   }
 
   if (ext === '.pdf') {
-    return extractFromPdf(filePath, supplierName);
+    const textData = await extractFromPdfText(filePath);
+    if (textData.length > 3) return textData;
+
+    return await extractWithAI(filePath, supplierName);
   }
 
-  return extractFromImageLikeFile(filePath, supplierName);
+  return await extractWithAI(filePath, supplierName);
 }
 
 module.exports = { extractCodesAndPrices };
