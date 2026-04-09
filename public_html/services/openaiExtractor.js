@@ -15,8 +15,16 @@ function extensionOf(filePath) {
 }
 
 // ==========================
-// HELPERS
+// 🔥 NORMALIZADORES (CLAVE)
 // ==========================
+function normalizeCode(code) {
+  return String(code)
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9\-]/g, '');
+}
+
 function normalizePrice(raw) {
   if (!raw) return null;
 
@@ -53,7 +61,7 @@ function looksLikeCode(text) {
 }
 
 // ==========================
-// 🔥 DETECTOR DE COLUMNA REAL
+// 🔥 DETECTOR DE TABLA
 // ==========================
 function extractFromTable(rows) {
   const results = [];
@@ -67,12 +75,10 @@ function extractFromTable(rows) {
     for (let i = 0; i < row.length; i++) {
       const cell = String(row[i]).trim();
 
-      // detectar código
       if (!codigo && looksLikeCode(cell)) {
-        codigo = cell;
+        codigo = normalizeCode(cell);
       }
 
-      // detectar precio SOLO si parece precio real
       if (!precio) {
         const match =
           cell.match(/\$\s*\d{1,3}(?:\.\d{3})*(?:,\d+)?/) ||
@@ -94,7 +100,7 @@ function extractFromTable(rows) {
 }
 
 // ==========================
-// EXCEL (AHORA BIEN HECHO)
+// EXCEL
 // ==========================
 function extractFromExcel(filePath) {
   const wb = xlsx.readFile(filePath);
@@ -122,13 +128,13 @@ async function extractFromPdfText(filePath) {
   const data = await pdf(buffer);
 
   const lines = data.text.split('\n');
-
   const rows = lines.map(line => line.split(/\s+/));
+
   return extractFromTable(rows);
 }
 
 // ==========================
-// IA OCR (IMÁGENES / PDFs ROTOS)
+// IA OCR
 // ==========================
 async function extractWithAI(filePath, supplierName) {
   const client = getClient();
@@ -149,24 +155,19 @@ async function extractWithAI(filePath, supplierName) {
             text: `
 Proveedor: ${supplierName}
 
-Analizá este documento (puede ser imagen o escaneo).
+Extraer códigos y precios del documento.
 
-Extraé SOLO tabla de productos.
-
-Formato de salida:
+Formato:
 CODIGO | PRECIO
 
 Ejemplo:
 IM2102002 | 40,73
-LEP-1100-6 | 29000
 
-REGLAS:
+Reglas:
 - ignorar descripciones
 - ignorar medidas
-- ignorar lumenes
 - ignorar cantidades
-- SOLO precio real de venta
-- recorrer todas las páginas
+- SOLO precio real
 `
           },
           {
@@ -180,8 +181,8 @@ REGLAS:
   });
 
   const text = (response.output_text || '').replace(/```/g, '');
-
   const rows = text.split('\n').map(l => l.split('|'));
+
   return extractFromTable(rows);
 }
 
