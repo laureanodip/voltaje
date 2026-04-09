@@ -13,7 +13,7 @@ function extensionOf(filePath) {
   return path.extname(filePath).toLowerCase();
 }
 
-// 🔹 EXCEL (igual que antes)
+// 🔹 EXCEL
 function workbookToText(filePath) {
   const wb = xlsx.readFile(filePath);
   let text = '';
@@ -30,7 +30,7 @@ function workbookToText(filePath) {
   return text;
 }
 
-// 🔥 PARSER INTELIGENTE FINAL
+// 🔥 PARSER FINAL
 function extractFromText(text) {
   const lines = text.split('\n');
   const results = [];
@@ -71,11 +71,11 @@ async function askAI(text) {
   return response.output_text || '';
 }
 
-// 🔥 IA VISIÓN (CLAVE)
+// 🔥 IA VISIÓN CORRECTA
 async function askVision(filePath, supplierName) {
   const client = getClient();
 
-  const imageBase64 = fs.readFileSync(filePath).toString("base64");
+  const base64 = fs.readFileSync(filePath).toString("base64");
 
   const response = await client.responses.create({
     model: "gpt-5-mini",
@@ -89,18 +89,15 @@ async function askVision(filePath, supplierName) {
             text: `
 Proveedor: ${supplierName}
 
-Extraer TODOS los códigos y precios visibles en la imagen.
+Extraer códigos y precios visibles.
 
 Formato:
 CODIGO PRECIO
-
-Ejemplo:
-LEP-1100-6 12500
 `
           },
           {
             type: "input_image",
-            image_base64: imageBase64
+            image_url: `data:image/png;base64,${base64}`
           }
         ]
       }
@@ -121,7 +118,6 @@ async function extractFromExcel(filePath, supplierName) {
 
 // 🔹 PDF / IMAGEN
 async function extractFromFile(filePath, supplierName) {
-  // 🔥 AHORA USA VISIÓN
   const aiText = await askVision(filePath, supplierName);
   return extractFromText(aiText);
 }
