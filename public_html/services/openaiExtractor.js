@@ -38,7 +38,7 @@ function workbookToCompactText(filePath) {
   return blocks.join('\n\n');
 }
 
-// 🔥 JSON extractor robusto
+// 🔥 PARSER ULTRA ROBUSTO
 function extractJson(raw) {
   try {
     return JSON.parse(raw);
@@ -53,7 +53,21 @@ function extractJson(raw) {
     const first = raw.indexOf('[');
     const last = raw.lastIndexOf(']');
     if (first !== -1 && last !== -1) {
-      return JSON.parse(raw.slice(first, last + 1));
+      let jsonText = raw.slice(first, last + 1);
+
+      // FIX 1: agregar comillas a claves
+      jsonText = jsonText.replace(/(\w+):/g, '"$1":');
+
+      // FIX 2: convertir coma decimal a punto
+      jsonText = jsonText.replace(/(\d+),(\d+)/g, '$1.$2');
+
+      // FIX 3: eliminar símbolos moneda
+      jsonText = jsonText.replace(/[$€]/g, '');
+
+      // FIX 4: eliminar texto extraño antes/después
+      jsonText = jsonText.trim();
+
+      return JSON.parse(jsonText);
     }
   } catch {}
 
@@ -62,7 +76,7 @@ function extractJson(raw) {
   throw new Error('La IA no devolvió un JSON válido.');
 }
 
-// 🔥 FUNCIÓN COMPATIBLE CON RENDER
+// 🔥 LLAMADA A IA
 async function askModelForJson(input) {
   const client = getClient();
 
@@ -86,15 +100,18 @@ async function askModelForJson(input) {
     max_output_tokens: 2000
   });
 
-  const text = response.output_text || "";
+  let text = response.output_text || "";
 
-  // 🔥 limpieza automática
-  return text
+  // 🔥 LIMPIEZA GENERAL
+  text = text
     .replace(/```json/g, "")
     .replace(/```/g, "")
     .trim();
+
+  return text;
 }
 
+// 🔹 EXCEL
 async function extractFromExcelWithAI(filePath, supplierName) {
   const workbookText = workbookToCompactText(filePath);
 
@@ -103,16 +120,19 @@ Extraer códigos y precios de lista.
 
 Proveedor: ${supplierName}
 
-Devolver SOLO JSON con este formato:
+Formato requerido:
 [{"codigo":"...","precio":12345.67,"confianza":"alta"}]
 
-NO agregar texto adicional.
+Reglas:
+- SOLO devolver JSON
+- NO agregar texto
 `;
 
   const raw = await askModelForJson(prompt + "\n\n" + workbookText);
   return extractJson(raw);
 }
 
+// 🔹 PDF / IMAGEN
 async function extractFromFileWithAI(filePath, supplierName) {
   const client = getClient();
 
@@ -150,6 +170,7 @@ NO agregar explicaciones.
   return extractJson(raw);
 }
 
+// 🔹 MAIN
 async function extractCodesAndPrices(filePath, supplierName) {
   const ext = extensionOf(filePath);
 
