@@ -37,9 +37,7 @@ function workbookToCompactText(filePath) {
   return blocks.join('\n\n');
 }
 
-//
-// 🔥 FUNCIÓN MEJORADA (CLAVE)
-//
+// 🔥 JSON extractor robusto
 function extractJson(raw) {
   try {
     return JSON.parse(raw);
@@ -63,9 +61,7 @@ function extractJson(raw) {
   throw new Error('La IA no devolvió un JSON válido.');
 }
 
-//
-// 🔥 FUNCIÓN MEJORADA (CLAVE)
-//
+// 🔥 FUNCIÓN CLAVE CORREGIDA (FORZAMOS JSON)
 async function askModelForJson(input) {
   const client = getClient();
 
@@ -86,6 +82,26 @@ async function askModelForJson(input) {
           }
         ],
 
+    // 🔥 ESTO SOLUCIONA TODO
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "lista_precios",
+        schema: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              codigo: { type: "string" },
+              precio: { type: "number" },
+              confianza: { type: "string" }
+            },
+            required: ["codigo", "precio"]
+          }
+        }
+      }
+    },
+
     max_output_tokens: 2000
   });
 
@@ -96,22 +112,14 @@ async function extractFromExcelWithAI(filePath, supplierName) {
   const workbookText = workbookToCompactText(filePath);
 
   const prompt = `
-Sos un extractor de listas de precios.
-
-IMPORTANTE:
-- Respondé SOLO JSON válido.
-- NO agregues texto antes ni después.
-
-Formato:
-[{"codigo":"...","precio":12345.67,"confianza":"alta"}]
+Extraer códigos y precios.
 
 Proveedor: ${supplierName}
 
-Contenido:
-${workbookText}
+Devolver SOLO JSON.
 `;
 
-  const raw = await askModelForJson(prompt);
+  const raw = await askModelForJson(prompt + "\n\n" + workbookText);
   return extractJson(raw);
 }
 
@@ -125,21 +133,6 @@ async function extractFromFileWithAI(filePath, supplierName) {
 
   const input = [
     {
-      role: 'system',
-      content: [
-        {
-          type: 'input_text',
-          text: `
-Sos un extractor de listas de precios.
-
-IMPORTANTE:
-- SOLO devolver JSON válido.
-- SIN texto extra.
-`
-        }
-      ]
-    },
-    {
       role: 'user',
       content: [
         {
@@ -147,10 +140,8 @@ IMPORTANTE:
           text: `
 Proveedor: ${supplierName}
 
-Formato requerido:
-[{"codigo":"...","precio":12345.67,"confianza":"alta"}]
-
-NO agregar explicaciones.
+Extraer códigos y precios.
+Devolver SOLO JSON.
 `
         },
         {
