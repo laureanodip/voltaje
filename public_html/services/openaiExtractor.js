@@ -5,9 +5,7 @@ const xlsx = require('xlsx');
 
 function getClient() {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('Falta OPENAI_API_KEY');
-  }
+  if (!apiKey) throw new Error('Falta OPENAI_API_KEY');
   return new OpenAI({ apiKey });
 }
 
@@ -15,7 +13,7 @@ function extensionOf(filePath) {
   return path.extname(filePath).toLowerCase();
 }
 
-function workbookToCompactText(filePath) {
+function workbookToText(filePath) {
   const wb = xlsx.readFile(filePath);
   let text = '';
 
@@ -24,79 +22,63 @@ function workbookToCompactText(filePath) {
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
     rows.slice(0, 200).forEach(r => {
-      text += r.join(' | ') + '\n';
+      text += r.join(' ') + '\n';
     });
   });
 
   return text;
 }
 
-// 🔥 PARSER ROBUSTO FINAL
-function safeParseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {}
+// 🔥 PARSER INTELIGENTE (NO JSON)
+function extractFromText(text) {
+  const lines = text.split('\n');
+  const results = [];
 
-  try {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-  } catch {}
+  const regex = /([A-Z0-9\-]{3,})\s+(\d{3,})/g;
 
-  try {
-    const match = text.match(/\[[\s\S]*\]/);
-    if (match) return JSON.parse(match[0]);
-  } catch {}
+  for (const line of lines) {
+    let match;
+    while ((match = regex.exec(line)) !== null) {
+      results.push({
+        codigo: match[1],
+        precio: Number(match[2])
+      });
+    }
+  }
 
-  console.log("⚠️ RESPUESTA IA:", text);
-  throw new Error("No se pudo parsear JSON");
+  return results;
 }
 
-// 🔥 LLAMADA SIMPLE Y ESTABLE
-async function askModel(prompt) {
+// 🔥 LLAMADA SIMPLE
+async function askAI(text) {
   const client = getClient();
 
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-    input: prompt,
+    input: text,
     max_output_tokens: 2000
   });
 
-  const text = response.output_text || "";
-
-  return text
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
+  return response.output_text || '';
 }
 
 // 🔹 EXCEL
-async function extractFromExcelWithAI(filePath, supplierName) {
-  const text = workbookToCompactText(filePath);
+async function extractFromExcel(filePath, supplierName) {
+  const text = workbookToText(filePath);
 
-  const prompt = `
-Extraer códigos y precios.
-
+  const aiText = await askAI(`
 Proveedor: ${supplierName}
 
-Responder SOLO JSON así:
-{
- "items":[
-  {"codigo":"...","precio":12345}
- ]
-}
+Extraer códigos y precios de este texto:
 
-Datos:
 ${text}
-`;
+`);
 
-  const raw = await askModel(prompt);
-  const parsed = safeParseJson(raw);
-
-  return parsed.items || [];
+  return extractFromText(aiText);
 }
 
 // 🔹 PDF
-async function extractFromFileWithAI(filePath, supplierName) {
+async function extractFromFile(filePath, supplierName) {
   const client = getClient();
 
   const uploaded = await client.files.create({
@@ -111,25 +93,8 @@ async function extractFromFileWithAI(filePath, supplierName) {
       {
         role: "user",
         content: [
-          {
-            type: "input_text",
-            text: `
-Proveedor: ${supplierName}
-
-Extraer códigos y precios.
-
-Formato:
-{
- "items":[
-  {"codigo":"...","precio":12345}
- ]
-}
-`
-          },
-          {
-            type: "input_file",
-            file_id: uploaded.id
-          }
+          { type: "input_text", text: `Extraer códigos y precios (${supplierName})` },
+          { type: "input_file", file_id: uploaded.id }
         ]
       }
     ],
@@ -137,14 +102,9 @@ Formato:
     max_output_tokens: 2000
   });
 
-  const text = (response.output_text || "")
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
+  const text = response.output_text || '';
 
-  const parsed = safeParseJson(text);
-
-  return parsed.items || [];
+  return extractFromText(text);
 }
 
 // 🔹 MAIN
@@ -152,10 +112,10 @@ async function extractCodesAndPrices(filePath, supplierName) {
   const ext = extensionOf(filePath);
 
   if (ext.includes('xls')) {
-    return extractFromExcelWithAI(filePath, supplierName);
+    return extractFromExcel(filePath, supplierName);
   }
 
-  return extractFromFileWithAI(filePath, supplierName);
+  return extractFromFile(filePath, supplierName);
 }
 
 module.exports = { extractCodesAndPrices };
