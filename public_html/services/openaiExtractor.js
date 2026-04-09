@@ -13,6 +13,7 @@ function extensionOf(filePath) {
   return path.extname(filePath).toLowerCase();
 }
 
+// 🔹 EXCEL (igual que antes)
 function workbookToText(filePath) {
   const wb = xlsx.readFile(filePath);
   let text = '';
@@ -29,7 +30,7 @@ function workbookToText(filePath) {
   return text;
 }
 
-// 🔥 PARSER MEJORADO (REALISTA)
+// 🔥 PARSER INTELIGENTE FINAL
 function extractFromText(text) {
   const lines = text.split('\n');
   const results = [];
@@ -37,23 +38,15 @@ function extractFromText(text) {
   for (const line of lines) {
     if (!line.trim()) continue;
 
-    // posibles códigos
-    const codigos = line.match(/[A-Z0-9\-]{3,}/g);
-
-    // posibles precios
+    const codigos = line.match(/[A-Z]{2,}-\d{2,}(-\d+)?/g);
     const precios = line.match(/\d{1,3}(\.\d{3})*(,\d+)?|\d+/g);
 
     if (!codigos || !precios) continue;
 
     const codigo = codigos[0];
 
-    // tomar último número como precio (más fiable)
     let precioRaw = precios[precios.length - 1];
-
-    // limpiar formatos
-    precioRaw = precioRaw
-      .replace(/\./g, '')   // miles
-      .replace(',', '.');  // decimal
+    precioRaw = precioRaw.replace(/\./g, '').replace(',', '.');
 
     const precio = Number(precioRaw);
 
@@ -62,66 +55,30 @@ function extractFromText(text) {
     }
   }
 
-  // 🔥 eliminar duplicados (mismo código → último precio)
-  const map = new Map();
-  results.forEach(r => map.set(r.codigo, r));
-
-  return Array.from(map.values());
+  return results;
 }
 
-// 🔥 LLAMADA A IA (MEJORADA)
+// 🔥 IA TEXTO
 async function askAI(text) {
   const client = getClient();
 
   const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+    model: "gpt-5-mini",
     input: text,
     max_output_tokens: 2000
   });
 
-  let output = response.output_text || '';
-
-  // limpiar basura típica
-  output = output
-    .replace(/```json/g, '')
-    .replace(/```/g, '')
-    .replace(/\$/g, '')
-    .trim();
-
-  return output;
+  return response.output_text || '';
 }
 
-// 🔹 EXCEL
-async function extractFromExcel(filePath, supplierName) {
-  const text = workbookToText(filePath);
-
-  const aiText = await askAI(`
-Proveedor: ${supplierName}
-
-Extraer códigos de producto y precios.
-
-IMPORTANTE:
-- devolver datos en texto claro
-- formato: CODIGO PRECIO
-- no explicar nada
-
-${text}
-`);
-
-  return extractFromText(aiText);
-}
-
-// 🔹 PDF / IMAGEN
-async function extractFromFile(filePath, supplierName) {
+// 🔥 IA VISIÓN (CLAVE)
+async function askVision(filePath, supplierName) {
   const client = getClient();
 
-  const uploaded = await client.files.create({
-    file: fs.createReadStream(filePath),
-    purpose: 'user_data',
-  });
+  const imageBase64 = fs.readFileSync(filePath).toString("base64");
 
   const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+    model: "gpt-5-mini",
 
     input: [
       {
@@ -132,16 +89,18 @@ async function extractFromFile(filePath, supplierName) {
             text: `
 Proveedor: ${supplierName}
 
-Extraer códigos y precios.
+Extraer TODOS los códigos y precios visibles en la imagen.
 
-FORMATO:
+Formato:
 CODIGO PRECIO
-SIN EXPLICACIONES
+
+Ejemplo:
+LEP-1100-6 12500
 `
           },
           {
-            type: "input_file",
-            file_id: uploaded.id
+            type: "input_image",
+            image_base64: imageBase64
           }
         ]
       }
@@ -150,16 +109,21 @@ SIN EXPLICACIONES
     max_output_tokens: 2000
   });
 
-  let text = response.output_text || '';
+  return response.output_text || '';
+}
 
-  // limpieza
-  text = text
-    .replace(/```json/g, '')
-    .replace(/```/g, '')
-    .replace(/\$/g, '')
-    .trim();
+// 🔹 EXCEL
+async function extractFromExcel(filePath, supplierName) {
+  const text = workbookToText(filePath);
+  const aiText = await askAI(text);
+  return extractFromText(aiText);
+}
 
-  return extractFromText(text);
+// 🔹 PDF / IMAGEN
+async function extractFromFile(filePath, supplierName) {
+  // 🔥 AHORA USA VISIÓN
+  const aiText = await askVision(filePath, supplierName);
+  return extractFromText(aiText);
 }
 
 // 🔹 MAIN
