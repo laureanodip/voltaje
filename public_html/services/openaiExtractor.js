@@ -31,7 +31,7 @@ function workbookToCompactText(filePath) {
   return text;
 }
 
-// 🔥 FUNCIÓN DEFINITIVA (COMPATIBLE API NUEVA)
+// 🔥 FUNCIÓN FINAL COMPATIBLE 100%
 async function askModelForJson(input) {
   const client = getClient();
 
@@ -47,18 +47,19 @@ async function askModelForJson(input) {
       }
     ],
 
-    // ✅ NUEVA FORMA CORRECTA
     text: {
       format: {
         type: "json_schema",
         name: "respuesta",
         schema: {
           type: "object",
+          additionalProperties: false,
           properties: {
             items: {
               type: "array",
               items: {
                 type: "object",
+                additionalProperties: false,
                 properties: {
                   codigo: { type: "string" },
                   precio: { type: "number" }
@@ -85,8 +86,7 @@ async function extractFromExcelWithAI(filePath, supplierName) {
   const prompt = `
 Proveedor: ${supplierName}
 
-Extraer códigos y precios.
-
+Extraer códigos y precios de lista.
 `;
 
   const result = await askModelForJson(prompt + "\n\n" + text);
@@ -131,11 +131,13 @@ Extraer códigos y precios.
         name: "respuesta",
         schema: {
           type: "object",
+          additionalProperties: false,
           properties: {
             items: {
               type: "array",
               items: {
                 type: "object",
+                additionalProperties: false,
                 properties: {
                   codigo: { type: "string" },
                   precio: { type: "number" }
