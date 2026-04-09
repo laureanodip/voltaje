@@ -21,7 +21,7 @@ function workbookToText(filePath) {
     const sheet = wb.Sheets[name];
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-    rows.slice(0, 200).forEach(r => {
+    rows.slice(0, 300).forEach(r => {
       text += r.join(' ') + '\n';
     });
   });
@@ -29,27 +29,47 @@ function workbookToText(filePath) {
   return text;
 }
 
-// 🔥 PARSER INTELIGENTE (NO JSON)
+// 🔥 PARSER MEJORADO (REALISTA)
 function extractFromText(text) {
   const lines = text.split('\n');
   const results = [];
 
-  const regex = /([A-Z0-9\-]{3,})\s+(\d{3,})/g;
-
   for (const line of lines) {
-    let match;
-    while ((match = regex.exec(line)) !== null) {
-      results.push({
-        codigo: match[1],
-        precio: Number(match[2])
-      });
+    if (!line.trim()) continue;
+
+    // posibles códigos
+    const codigos = line.match(/[A-Z0-9\-]{3,}/g);
+
+    // posibles precios
+    const precios = line.match(/\d{1,3}(\.\d{3})*(,\d+)?|\d+/g);
+
+    if (!codigos || !precios) continue;
+
+    const codigo = codigos[0];
+
+    // tomar último número como precio (más fiable)
+    let precioRaw = precios[precios.length - 1];
+
+    // limpiar formatos
+    precioRaw = precioRaw
+      .replace(/\./g, '')   // miles
+      .replace(',', '.');  // decimal
+
+    const precio = Number(precioRaw);
+
+    if (!isNaN(precio) && precio > 0) {
+      results.push({ codigo, precio });
     }
   }
 
-  return results;
+  // 🔥 eliminar duplicados (mismo código → último precio)
+  const map = new Map();
+  results.forEach(r => map.set(r.codigo, r));
+
+  return Array.from(map.values());
 }
 
-// 🔥 LLAMADA SIMPLE
+// 🔥 LLAMADA A IA (MEJORADA)
 async function askAI(text) {
   const client = getClient();
 
@@ -59,7 +79,16 @@ async function askAI(text) {
     max_output_tokens: 2000
   });
 
-  return response.output_text || '';
+  let output = response.output_text || '';
+
+  // limpiar basura típica
+  output = output
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .replace(/\$/g, '')
+    .trim();
+
+  return output;
 }
 
 // 🔹 EXCEL
@@ -69,7 +98,12 @@ async function extractFromExcel(filePath, supplierName) {
   const aiText = await askAI(`
 Proveedor: ${supplierName}
 
-Extraer códigos y precios de este texto:
+Extraer códigos de producto y precios.
+
+IMPORTANTE:
+- devolver datos en texto claro
+- formato: CODIGO PRECIO
+- no explicar nada
 
 ${text}
 `);
@@ -77,7 +111,7 @@ ${text}
   return extractFromText(aiText);
 }
 
-// 🔹 PDF
+// 🔹 PDF / IMAGEN
 async function extractFromFile(filePath, supplierName) {
   const client = getClient();
 
@@ -93,8 +127,22 @@ async function extractFromFile(filePath, supplierName) {
       {
         role: "user",
         content: [
-          { type: "input_text", text: `Extraer códigos y precios (${supplierName})` },
-          { type: "input_file", file_id: uploaded.id }
+          {
+            type: "input_text",
+            text: `
+Proveedor: ${supplierName}
+
+Extraer códigos y precios.
+
+FORMATO:
+CODIGO PRECIO
+SIN EXPLICACIONES
+`
+          },
+          {
+            type: "input_file",
+            file_id: uploaded.id
+          }
         ]
       }
     ],
@@ -102,7 +150,14 @@ async function extractFromFile(filePath, supplierName) {
     max_output_tokens: 2000
   });
 
-  const text = response.output_text || '';
+  let text = response.output_text || '';
+
+  // limpieza
+  text = text
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .replace(/\$/g, '')
+    .trim();
 
   return extractFromText(text);
 }
