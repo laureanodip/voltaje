@@ -31,7 +31,7 @@ function workbookToCompactText(filePath) {
   return text;
 }
 
-// 🔥 FUNCIÓN DEFINITIVA (NO FALLA NUNCA)
+// 🔥 FUNCIÓN DEFINITIVA (COMPATIBLE API NUEVA)
 async function askModelForJson(input) {
   const client = getClient();
 
@@ -47,13 +47,35 @@ async function askModelForJson(input) {
       }
     ],
 
-    // 🔥 ESTO ES LA CLAVE TOTAL
-    response_format: { type: "json_object" },
+    // ✅ NUEVA FORMA CORRECTA
+    text: {
+      format: {
+        type: "json_schema",
+        name: "respuesta",
+        schema: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  codigo: { type: "string" },
+                  precio: { type: "number" }
+                },
+                required: ["codigo", "precio"]
+              }
+            }
+          },
+          required: ["items"]
+        }
+      }
+    },
 
     max_output_tokens: 2000
   });
 
-  return JSON.parse(response.output_text);
+  return response.output_parsed;
 }
 
 // 🔹 EXCEL
@@ -61,20 +83,13 @@ async function extractFromExcelWithAI(filePath, supplierName) {
   const text = workbookToCompactText(filePath);
 
   const prompt = `
-Extraer códigos y precios de lista.
-
 Proveedor: ${supplierName}
 
-Devolver JSON con este formato EXACTO:
-{
-  "items": [
-    {"codigo": "...", "precio": 12345.67}
-  ]
-}
+Extraer códigos y precios.
+
 `;
 
   const result = await askModelForJson(prompt + "\n\n" + text);
-
   return result.items || [];
 }
 
@@ -100,13 +115,6 @@ async function extractFromFileWithAI(filePath, supplierName) {
 Proveedor: ${supplierName}
 
 Extraer códigos y precios.
-
-Formato:
-{
-  "items": [
-    {"codigo": "...", "precio": 12345.67}
-  ]
-}
 `
           },
           {
@@ -117,14 +125,34 @@ Formato:
       }
     ],
 
-    response_format: { type: "json_object" },
+    text: {
+      format: {
+        type: "json_schema",
+        name: "respuesta",
+        schema: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  codigo: { type: "string" },
+                  precio: { type: "number" }
+                },
+                required: ["codigo", "precio"]
+              }
+            }
+          },
+          required: ["items"]
+        }
+      }
+    },
 
     max_output_tokens: 2000
   });
 
-  const result = JSON.parse(response.output_text);
-
-  return result.items || [];
+  return response.output_parsed.items || [];
 }
 
 // 🔹 MAIN
