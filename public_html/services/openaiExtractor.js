@@ -23,6 +23,7 @@ function workbookToCompactText(filePath) {
     const sheet = wb.Sheets[sheetName];
     const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     const limitedRows = rows.slice(0, 300).map((row) => row.slice(0, 30));
+
     const text = limitedRows
       .map((row) =>
         row
@@ -61,7 +62,7 @@ function extractJson(raw) {
   throw new Error('La IA no devolvió un JSON válido.');
 }
 
-// 🔥 FUNCIÓN CLAVE CORREGIDA (FORZAMOS JSON)
+// 🔥 FUNCIÓN COMPATIBLE CON RENDER
 async function askModelForJson(input) {
   const client = getClient();
 
@@ -82,41 +83,30 @@ async function askModelForJson(input) {
           }
         ],
 
-    // 🔥 ESTO SOLUCIONA TODO
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "lista_precios",
-        schema: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              codigo: { type: "string" },
-              precio: { type: "number" },
-              confianza: { type: "string" }
-            },
-            required: ["codigo", "precio"]
-          }
-        }
-      }
-    },
-
     max_output_tokens: 2000
   });
 
-  return response.output_text || '';
+  const text = response.output_text || "";
+
+  // 🔥 limpieza automática
+  return text
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
 }
 
 async function extractFromExcelWithAI(filePath, supplierName) {
   const workbookText = workbookToCompactText(filePath);
 
   const prompt = `
-Extraer códigos y precios.
+Extraer códigos y precios de lista.
 
 Proveedor: ${supplierName}
 
-Devolver SOLO JSON.
+Devolver SOLO JSON con este formato:
+[{"codigo":"...","precio":12345.67,"confianza":"alta"}]
+
+NO agregar texto adicional.
 `;
 
   const raw = await askModelForJson(prompt + "\n\n" + workbookText);
@@ -141,7 +131,11 @@ async function extractFromFileWithAI(filePath, supplierName) {
 Proveedor: ${supplierName}
 
 Extraer códigos y precios.
-Devolver SOLO JSON.
+
+Formato:
+[{"codigo":"...","precio":12345.67,"confianza":"alta"}]
+
+NO agregar explicaciones.
 `
         },
         {
